@@ -48,17 +48,13 @@ class FieldsPlugin {
 		return [... new Set(ignore.filter(d => !!d))]
 	}
 
-	clearFieldsJson(compilation) {
-		return new Promise(async (resolve, reject) => {
-			let distFolder = compilation.options.output.path;
-			glob.sync(`${distFolder}/**/*fields.json`, {})
-				.forEach(file => fs.unlinkSync(file))
-			resolve();
-		});
-	}
-
+	/**
+	 * Handle it now so fields.js is not uploaded to HubSpot because hsAutouploadPlugin looks for this to be emitted: true in order to upload
+	 */
 	stopJsUploadToHubspot(compilation, { JsDistRelativePath, JsonDistRelativePath, JsonDistFullPath }) {
-		// Handle it now so fields.js is not uploaded to HubSpot because hsAutouploadPlugin looks for this to be emitted: true in order to upload
+		// Removes leading slashes from the assets to avoid upload errors
+		JsonDistRelativePath = (JsonDistRelativePath.substring(0, 1) === '/') ? JsonDistRelativePath.substring(1) : JsonDistRelativePath;
+		// Delete Js to replace with JSON
 		delete compilation.assets[JsDistRelativePath];
 		// Add in the newly created json into assets so hubSpot will report it
 		compilation.assets[JsonDistRelativePath] = {
@@ -80,12 +76,6 @@ class FieldsPlugin {
 		this.foldersToIgnore = this.listFoldersToIgnore({ baseDirPath: compiler.context })
 		this.directoriesToWatch = this.listExtraDirectoriesToWatch({ baseDirPath: compiler.context })
 
-		// Clear out any old fields.json files before compiler runs.
-		// This is to ensure that we dont end up with duplicate fields.
-		compiler.hooks.run.tapPromise(pluginName, this.clearFieldsJson);
-		compiler.hooks.watchRun.tapPromise(pluginName, this.clearFieldsJson);
-		compiler.hooks.emit.tapPromise(pluginName, this.clearFieldsJson);
-
 		// When watching, update the modie
 		compiler.hooks.watchRun.tap(pluginName, compilation => {
 			this.modifiedFiles = compilation.modifiedFiles ? Array.from(compilation.modifiedFiles) : [];
@@ -101,18 +91,20 @@ class FieldsPlugin {
 			//
 			const webpackLogger = compiler.getInfrastructureLogger(pluginName);
 			const webpackRoot = compilation.options.context
-			const srcFolder = path.resolve(webpackRoot, this.options.src);
 			const distFolder = compilation.options.output.path;
+			
+			let lookInFolders = Array.isArray(this.options.src) ? this.options.src : [this.options.src]
+			lookInFolders = lookInFolders.map(src => path.resolve(webpackRoot, src))
 
 			// Handle fields.js file
 			return await new Promise((resolve, reject) => {
 
 				// Get Files
 				let files = getFilesToTransform({
-					pathToDir: srcFolder,
+					pathToDir: lookInFolders,
 					ignore: this.foldersToIgnore
 				})
-
+				
 				// Find every modules fields.js file.
 				files.forEach(JsSrcFullPath => {
 					try {
@@ -121,44 +113,68 @@ class FieldsPlugin {
 						let fileUniqueKey = JsSrcFullPath.split("/").slice(-2).join('/');
 						// Get the path from the DIST folder for the asset
 						let JsDistRelativePath = Object.keys(compilation.assets).find(a => a.endsWith(fileUniqueKey)) || ''
+						
+						// Only transform if file was emitted
+						if (!JsDistRelativePath) { return true; }
+
 						// If JS file was found in the emitted assets then we should handle it for webpack 
 						let fileWasEmitted = (Array.from(compilation.emittedAssets).indexOf(JsDistRelativePath) > -1)
 						let shouldTransform = fileWasEmitted || isFirstCompile;
 
 						// Check if a file in one of our additional directories was modified
 						if (!shouldTransform) {
-							shouldTransform = this.modifiedFiles.some(path => (this.directoriesToWatch.indexOf(path) > -1))
+							shouldTransform = this.modifiedFiles.some(path => {
+								if (this.directoriesToWatch.includes(path)) { 
+									Object.keys(require.cache).forEach(key => {
+										if (key.startsWith(path)) {
+											delete require.cache[key]
+										}
+									})
+									return true
+								}
+								return false
+							})
 							if (!shouldTransform) { return; }
 						}
 
-						// Use the Logger interface like HubSpot
-						webpackLogger.info(`FieldsJS is tranforming ${path.relative(srcFolder, JsSrcFullPath)}`);
-
 						// Transform
 						let fieldsJson = transformDataToJsonFromJsFile(JsSrcFullPath)
-						// Get path for json file in dis
+
+						// Get path for json file in output
 						let JsonDistRelativePath = JsDistRelativePath.replace('fields.js', 'fields.json');
 						let JsonDistFullPath = path.resolve(distFolder, './' + JsonDistRelativePath);
-						//
-						writeJsonToFile(JsonDistFullPath, fieldsJson)
+						
+						// 
+						if (writeJsonToFile(JsonDistFullPath, fieldsJson)) {
+							// Use the Logger interface like HubSpot		
+							let folderLog = ''
+							let folderFoundIn = lookInFolders[0]
+							if (lookInFolders.length > 1) {
+								folderFoundIn = lookInFolders.find(dir => JsSrcFullPath.startsWith(dir))
+								folderLog = ` found in /${path.relative(webpackRoot, folderFoundIn)}`
+							}
+							webpackLogger.info(`FieldsJS tranformed ${path.relative(folderFoundIn, JsSrcFullPath)}${folderLog}`);
+							
+							// Stop Js from Uploading
+							this.stopJsUploadToHubspot(compilation, {
+								JsDistRelativePath,
+								JsonDistRelativePath,
+								JsonDistFullPath
+							})
+							// Remove field.js file from dist directory.
+							let JsDistFullPath = path.resolve(distFolder, './' + JsDistRelativePath);
+							(fs.existsSync(JsDistFullPath) ? fs.unlinkSync(JsDistFullPath) : null);
+	
+							// remove fields.js from cache so it will reupload on future watch saves
+							clearFileFromCache(JsSrcFullPath)
+						}
 
-						// Stop Js from Uploading
-						this.stopJsUploadToHubspot(compilation, {
-							JsDistRelativePath,
-							JsonDistRelativePath,
-							JsonDistFullPath
-						})
-
-						// Remove field.js file from dist directory.
-						let JsDistFullPath = path.resolve(distFolder, './' + JsDistRelativePath);
-						(fs.existsSync(JsDistFullPath) ? fs.unlinkSync(JsDistFullPath) : null);
-
-						// remove fields.js from cache so it will reupload on future watch saves
-						clearFileFromCache(JsSrcFullPath)
 
 					} catch (e) {
 						clearFileFromCache(JsSrcFullPath);
-						console.log("Could not transform: " + JsSrcFullPath + "\nError: " + e.message);
+						webpackLogger.error("Could not transform: " + JsSrcFullPath + "\nError: " + (e.message || ''));
+						console.error(e.stack || '')
+						//throw e.ReferenceError
 					}
 				})
 

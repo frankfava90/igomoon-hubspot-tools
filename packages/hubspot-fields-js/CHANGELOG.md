@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2022-10-20
+- Updates for Webpack FieldsPlugin
+
+### Webpack FieldsPlugin
+- Remove `clearFieldsJson` that would remove all the json from the dist folder before running. Will now just replace the current json file with the refreshly transformed file
+- When a change is made in an extra directory to watch, cache is cleared to get a fresh copy. No longer need to restart or resave the module fields.js. 
+- `src` option now accepts multlipe directory paths, relative to the webpack root. **NOTE:** Make sure these are also copied to output folder with `copy-webpack-plugin` 
+	``` javascript
+	new FieldsPlugin({
+		src: ['./src','./extra'],
+		....
+	}),
+	```
+- Remove leading slashes from the emitted assets to avoid upload errors to hubpsot
+- Check that file is found in output folder before transforming js file
+- Check that file was properly transformed before showing successful log message
+
+
 ## [1.5.2] - 2022-04-08
 - Fix FieldsPlugin key
 
