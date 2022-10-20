@@ -1,9 +1,9 @@
 {
 	"scripts": {
 		"local": "mix",
-		"watch": "mix watch -- --env hsAutoUpload=true",
-		"build": "mix -- --env hsAutoUpload=true",
-		"deploy": "mix --production -- --env hsAutoUpload=true"
+        "watch": "mix watch -- --env hsAutoUpload=true",
+        "build": "mix -- --env hsAutoUpload=true",
+        "deploy": "mix -- --env hsAutoUpload=true --env production"
 	},
 	"devDependencies": {
 		"@hubspot/webpack-cms-plugins": "^3.0.9",

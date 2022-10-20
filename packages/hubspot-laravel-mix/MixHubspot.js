@@ -1,29 +1,39 @@
 const path = require('path');
-
 class MixHubspot {
+
+	registeredOptions = {}
+	pluginOptions = {}
+	pluginsToLoad = []
 
 	name() { return ['hubspot']; }
 	
 	dependencies() {
-		// NOTE: @hubspot/webpack-cms-plugins will not resolve due to an missing "main" definition in its package json
+		// NOTE: @hubspot/webpack-cms-plugins will not resolve due to a missing "main" definition in its package json
 		return [
 			'copy-webpack-plugin@^8.1.1',
-			//'@hubspot/webpack-cms-plugins@^3.0.9',
-			'@igomoon/hubspot-fields-js@^1.3.0',
-			'webpack-build-notifier@^2.1.1'
+			// '@hubspot/webpack-cms-plugins@^3.0.9',
+			'@igomoon/hubspot-fields-js@^1.3.0'
 		];
 	}
 	
 	register(options = {}) {
-		this.passedOptions = Object.assign({}, this.options.interface, options)
+		// Backwards compatibility with old uppercase-first keys
+		Object.keys(this.options.interface).forEach(key => {
+			let oldKey = key.charAt(0).toUpperCase() + key.slice(1)
+			if ((options[oldKey] !== undefined)) {
+				options[key] = options[oldKey]
+				delete options[oldKey]
+			}
+		})
+
+		// Parse Options
+		this.registeredOptions = Object.assign({}, this.options.interface, options)
+		// Register Plugins
+		this.registerPluginsToLoad()
 	}
 
 	boot() {
-		if (!!this.Notifications) {
-			this.context.config.notifications = false;
-		}
-
-		// Ad help text to help resolve the HubSpot package error
+		// Add help text to help resolve the HubSpot package error
 		try {
 			require(this.context.resolve('@hubspot/webpack-cms-plugins/HubSpotAutoUploadPlugin'));
 		} catch(e){
@@ -32,156 +42,33 @@ class MixHubspot {
 		}
 	}
 
-	webpackPlugins() {
-		let pluginsList = [
-			(!!this.Notifications ? this.components.UseCustomWebpackNotifier() : false),
-			(!!this.Upload ? this.components.UseHubspotAutoUploader() : false),
-			(!!this.FieldsJs ? this.components.UseFieldsJs() : false)
-		]
-		let pluginsToUse = []
-		pluginsList
-			.filter(p => !!p)
-			.forEach(p => {
-				pluginsToUse = pluginsToUse.concat((Array.isArray(p) ? p : [p]))
-			})
-		return pluginsToUse
-	}
-
 	webpackConfig(webpackConfig) {
-		// Upload
-		let upload = this.Upload
-		if (!!upload.outputFolder && !!upload.dest) {
-			// Change Dist Folder
-			webpackConfig.output.path = path.resolve(this.context.paths.rootPath,this.Upload.outputFolder)
-			// Change Logger Interface level
-			if (!!this.FieldsJs || (this.isAutoUpload && !this.isHsSilent)) {
-				webpackConfig.infrastructureLogging = { level: 'info' }	
-			}
-		}
-
-		// Disable Mix Table
-		if (this.DisableMixTable) {
-			this.components.DisableMixTableOutput(webpackConfig)
-		}
+		const webpack = require(this.context.resolve('webpack'));
+		webpackConfig.plugins = [new webpack.DefinePlugin({
+			IS_DEV: JSON.stringify(!(process.argv.includes('production')) && process.env.NODE_ENV != 'production')
+		})]
+		this.loadPlugins(webpackConfig)
 	}
 
 	options = {
 		interface: {
-			Label: '',
-			Upload: {},
-			FieldsJs: false,
-			Notifications: {},
-			DisableMixTable : true
+			label: '',
+			upload: {},
+			fieldsJs: false,
+			notifications: {},
+			disableMixTable: true
 		},
-		
-		get: (key) => {
-			return !!key ? this.options.data[key] : this.options.data
-		},
-
-		component: ( key = '', defaults = null) => {
+		parseOptionFor: (key, defaults = null) => {
 			if (!key || this.options.interface[key] == undefined) {
 				return null;
 			}
-			let passed = this.passedOptions[key]
-			if (typeof passed == 'boolean') {
-				if (!passed) {
-					return false
-				}
-				passed = defaults
-			}
-			return (typeof passed != 'object') ? passed : Object.assign({}, defaults, passed)
+			let registeredOptions = this.registeredOptions[key]
+			if (registeredOptions === false) { return false }
+			// Options
+			return (typeof registeredOptions == 'object') ?
+				Object.assign({}, defaults, registeredOptions) :
+				registeredOptions
 		}
-	}
-
-	components = {
-		
-		UseFieldsJs: () => {
-			const { FieldsPlugin } = require(this.context.resolve('@igomoon/hubspot-fields-js'));
-			return new FieldsPlugin(this.FieldsJs)
-		},
-		
-		UseHubspotAutoUploader: () => {
-			let options = this.Upload
-			if (!Array.isArray(options.patterns) || !options.patterns.length) {
-				return false
-			}
-
-			const CopyWebpackPlugin = require(this.context.resolve('copy-webpack-plugin'));
-			const HubSpotAutoUploadPlugin = require(this.context.resolve('@hubspot/webpack-cms-plugins/HubSpotAutoUploadPlugin'));
-
-			let plugins = [
-				// Copy Webpack
-				new CopyWebpackPlugin({ patterns: options.patterns })			
-			]
-			
-			if (!!options.outputFolder && !!options.dest) {
-				plugins = plugins.concat([
-					// Upload
-					new HubSpotAutoUploadPlugin({
-						autoupload: this.isAutoUpload,
-						src:  path.resolve(this.context.paths.rootPath,this.Upload.outputFolder),
-						dest:  this.Upload.dest,
-					}),
-					// Removes leading slashes from the assets to avoid upload errors
-					{
-						apply(compiler) {
-							compiler.hooks.afterEmit.tapPromise('HS-MIX-FIX', async compilation => {
-								Object.entries(compilation.assets).forEach(([path, data]) => {
-									if (path.substring(0, 1) !== '/') { return }
-									let newPath = path.substring(1)
-									// Update Assets
-									delete compilation.assets[path]
-									compilation.assets[newPath] = data
-									// Update Emitted
-									compilation.emittedAssets.delete(path)
-									compilation.emittedAssets.add(newPath)
-								})
-							})
-						}
-					}
-				])
-			}
-			return plugins
-		},
-		
-		UseCustomWebpackNotifier: () => {
-			const WebpackBuildNotifierPlugin = require(this.context.resolve('webpack-build-notifier'));
-			return new WebpackBuildNotifierPlugin(this.Notifications)
-		},
-		
-		DisableMixTableOutput: (config) => {
-			let BuildOutputPlugin = require(this.context.resolve('laravel-mix/src/webpackPlugins/BuildOutputPlugin'));
-			config.plugins = config.plugins.filter(p => !(p instanceof BuildOutputPlugin))
-		}
-	}
-
-	get Label() {
-		return this.options.component('Label') || ''
-	}
-	
-	get Upload() {
-		return this.options.component('Upload',{
-			outputFolder: 'dist',
-			patterns: [],
-			dest: ""
-		})
-	}
-	
-	get FieldsJs() {
-		return this.options.component('FieldsJs', false)
-	}
-
-	get Notifications() {
-		return this.options.component('Notifications',{
-			title: this.Label || "Dist Folder",
-			suppressWarning: true,
-			showDuration: true,
-			successSound: !this.context.isWatching() ? 'fog' : false
-		})
-	}
-
-	get DisableMixTable() {
-		return !!this.options.component('DisableMixTable')
 	}
 	
 	get isAutoUpload() {
@@ -200,14 +87,131 @@ class MixHubspot {
 		return global.Mix;
 	}
 
-	helpers = {
-		merge : (target, source) => {
-			for (const key of Object.keys(source)) {
-				if (source[key] instanceof Object) Object.assign(source[key], this.helpers.merge(target[key], source[key]))
+	// --------------------------------
+
+	// Maps options from all plugins
+	getPluginOptions() { 
+		let options = {}
+		Object.entries(this.plugins).forEach(p => { 
+			let [key, callback] = p
+			options[key] = callback().options
+		})
+		this.pluginOptions = options
+		return this.pluginOptions
+	}
+
+	// Determine which plugins to use
+	registerPluginsToLoad() {
+		// Load All Options
+		this.getPluginOptions()
+		// Register Plugins
+		this.pluginsToLoad =  Object.entries(this.plugins).map(p => { 
+			let [key, callback] = p
+			let plugin = callback.call(this)
+			// Callback
+			if (typeof plugin.beforeRegistered == 'function') { plugin.beforeRegistered.call(this) }
+			// Filter out if false
+			if (plugin === false || this.pluginOptions[key] === false) { return false }
+			// Callback
+			if (typeof plugin.whenRegistered == 'function') { plugin.whenRegistered.call(this) }
+			// Save callback and options
+			return { load: plugin.load, options: this.pluginOptions[key] }
+		}).filter(p => !!p)
+	}
+
+	// Load Registered Plugins
+	loadPlugins(webpackConfig) {
+		this.pluginsToLoad.forEach(plugin => { 
+			let p = plugin.load({ webpackConfig, options : plugin.options})
+			if(typeof p == 'object') {
+				webpackConfig.plugins = webpackConfig.plugins.concat((Array.isArray(p) ? p : [p]))
 			}
-			Object.assign(target || {}, source)
-			return target
-		}
+		})
+	}
+
+	plugins = {
+		upload: () => ({
+			options: this.options.parseOptionFor('upload', {
+				outputFolder: 'dist',
+				patterns: [],
+				dest: ""
+			}),
+			load: ({ webpackConfig, options }) => {
+				let plugins = []
+				
+				// Coppy Plugins
+				if (!Array.isArray(options.patterns) || !options.patterns.length) { return false }
+				const CopyWebpackPlugin = require(this.context.resolve('copy-webpack-plugin'));
+				plugins = [new CopyWebpackPlugin({ patterns: options.patterns })]
+				
+				// Auto Upload
+				if (!!options.outputFolder) {
+					// Change Dist Folder
+					webpackConfig.output.path = path.resolve(this.context.paths.rootPath, options.outputFolder)
+					
+					if (!!options.dest) {
+						// Change Logger Interface level
+						if (this.isAutoUpload && !this.isHsSilent) {
+							webpackConfig.infrastructureLogging = { level: 'info' }
+						}
+					
+						// Suetp HS Upload Plugin
+						const HubSpotAutoUploadPlugin = require(this.context.resolve('@hubspot/webpack-cms-plugins/HubSpotAutoUploadPlugin'));
+					
+						plugins = plugins.concat([
+							// Upload
+							new HubSpotAutoUploadPlugin({
+								autoupload: this.isAutoUpload,
+								src: webpackConfig.output.path,
+								dest: options.dest,
+							})
+						])
+					}
+				}
+				return plugins
+			}
+		}),
+		fieldsJs: () => ({
+			options: this.options.parseOptionFor('fieldsJs', false),
+			load: ({ webpackConfig, options }) => {
+				webpackConfig.infrastructureLogging = { level: 'info' }	
+				const { FieldsPlugin } = require(this.context.resolve('@igomoon/hubspot-fields-js'));
+				return [new FieldsPlugin(options)]
+			}
+		}),
+		notifications: () => ({
+			options : this.options.parseOptionFor('notifications',{
+				title: this.pluginOptions.label || "Dist Folder",
+				showOnSuccess : true,
+				showWarnings : true,
+				showOnError: true, 
+				emoji: false,
+				skipFirst: false,
+				icon : true
+			}),
+			beforeRegistered: () => { this.context.config.notifications = false; },
+			load: ({ options }) => {
+				const WebpackNotifierPlugin = require(this.context.resolve('webpack-notifier'));
+				return new WebpackNotifierPlugin({	
+					title: options.title,
+					excludeWarnings: !options.showWarnings,
+					alwaysNotify: !!options.showOnSuccess,
+					onlyOnError: !options.showOnSuccess || (!options.showWarnings && !!options.showOnError), 
+					emoji: !!options.emoji,
+					skipFirstNotification : !!options.skipFirst,
+					timeout: false,
+					hint: process.platform === 'linux' ? 'int:transient:1' : undefined,
+					contentImage : !!options.icon ? this.context.paths.root('node_modules/@igomoon/hubspot-laravel-mix/icons/hubspot.png') : null
+				})
+			}
+		}),
+		disableMixTable: () => ({
+			options: this.options.parseOptionFor('disableMixTable'),
+			load: ({ webpackConfig }) => {
+				let BuildOutputPlugin = require(this.context.resolve('laravel-mix/src/webpackPlugins/BuildOutputPlugin'));
+				webpackConfig.plugins = webpackConfig.plugins.filter(p => !(p instanceof BuildOutputPlugin))
+			}
+		}),
 	}
 
 }

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2022-10-13
+- Refactor
+- options changes to use lowercase
+- Use Laravel Mix `webpack-notifier` instead of additional dependency `webpack-build-notifier`
+- Add in IS_DEV Variable using Define Plugin so `-- --env production` flag can be used for building production
+- Remove HS-MIX-FIX anonymous plugin as it's fix in latest version of Fields JS
+
 ## [1.0.4] - 2022-04-08
 - Fix Readme Version Badge
 ## [1.0.3] - 2022-04-08

@@ -1,6 +1,6 @@
 # Laravel Mix HubSpot Extension <!-- omit in toc -->
 
-![1.0.4](https://img.shields.io/badge/Version-1.0.4-brightgreen)
+![1.1.0](https://img.shields.io/badge/Version-1.1.0-brightgreen)
 
 This is a Laravel Mix Extension for HubSpot Local Development
 
@@ -16,11 +16,12 @@ let mix = require('laravel-mix');
 3. Run `npm run local` so Laravel Mix will install the dependencies need according to your mix config file.
 	- **IMPORTANT**: Due to an error within the current version of the [`@hubspot/webpack-cms-plugins`](https://www.npmjs.com/package/@hubspot/webpack-cms-plugins) package, it is unable to be installed by Laravel Mix automatically. It should be included in your starting `package.json` file or by running `npm install @hubspot/webpack-cms-plugins --save-dev`.
 4. Run `hs init` to use [`@hubspot/cli`](https://developers.hubspot.com/docs/cms/developer-reference/local-development-cli) to authenticate with your HubSpot portal
-5. Use one of the included npm scripts in our example package.json to begin
-	- `npm run local` - Build in "development" mode
-	- `npm run watch` - Build in "development" mode, and watch for changes (will upload to HubSpot)
-	- `npm run build` - Build once in "development" mode (will upload to HubSpot)
-	- `npm run deploy` - Build once in "production" mode (will upload to HubSpot)
+5. Run mix command (or use the included npm scripts in our example package.json) to begin
+	- `npx mix` - Build in "development" mode
+	- `npx mix watch` - Build in "development" mode, and watch for changes (no uploade)
+	- `npx mix  -- --env hsAutoUpload=true` - Build once in "development" mode (will upload to HubSpot)
+	- `npx mix watch  -- --env hsAutoUpload=true` - Build in "development" mode, and watch for changes (will upload to HubSpot)
+	- `npx mix  -- --env hsAutoUpload=true --env production` - Build once in "production" mode (will upload to HubSpot)
 
 ### Option: "hsSilent=true"
 You can use "hsSilent" to mute the HubSpot Logger Information
@@ -34,9 +35,9 @@ mix watch -- --env hsAutoUpload=true "hsSilent=true"
 {
 	"scripts": {
 		"local": "mix",
-		"watch": "mix watch -- --env hsAutoUpload=true",
-		"build": "mix -- --env hsAutoUpload=true",
-		"deploy": "mix --production -- --env hsAutoUpload=true"
+        "watch": "mix watch -- --env hsAutoUpload=true",
+        "build": "mix -- --env hsAutoUpload=true",
+        "deploy": "mix -- --env hsAutoUpload=true --env production"
 	},
 	"devDependencies": {
 		"@hubspot/webpack-cms-plugins": "^3.0.9",
@@ -53,17 +54,11 @@ let mix = require('laravel-mix');
 (require('@igomoon/hubspot-laravel-mix')(mix))
 
 mix.js(`src/resources/js/main.js`, `assets/js/main.js`);
-
-mix.sass(`src/resources/scss/main.dev.scss`, `assets/css/main.css`, {
-	sassOptions: {
-		indentWidth: 4,
-		outputStyle: `expanded` // expanded | compressed
-	}
-});
+mix.sass(`src/resources/scss/main.dev.scss`, `assets/css/main.css`);
 
 mix.hubspot({
-	Label: 'My Theme',
-	Upload: {
+	label: 'My Theme',
+	upload: {
 		outputFolder: 'dist',
 		dest: 'theme-folder',
 		patterns: [
@@ -73,7 +68,8 @@ mix.hubspot({
 			{ from: 'src/resources/icons', to: 'assets/icons' }
 		]
 	},
-	FieldsJs: {
+	fieldsJs: {
+		src : "./src", // Can be array
 		extraDirsToWatch: ["./src/fields"]
 	}
 })
@@ -89,4 +85,3 @@ This extensions uses:
 - [copy-webpack-plugin](https://webpack.js.org/plugins/copy-webpack-plugin/)
 - [@hubspot/webpack-cms-plugins](https://www.npmjs.com/package/@hubspot/webpack-cms-plugins)
 - [@igomoon/hubspot-fields-js](https://www.npmjs.com/package/@igomoon/hubspot-fields-js)
-- [webpack-build-notifier](https://www.npmjs.com/package/webpack-build-notifier) (Will override the Mix default)
