@@ -1,33 +1,16 @@
-const ModuleField = require('./ModuleField');
-const { transformDataToJson } = require('../lib/FieldTransformer')
+const _HublField = require('./_HublField');
+const { transformDataToJson } = require('../../src/lib/FieldTransformer')
 
-class Group extends ModuleField {
-
-    constructor(overrides = {}, children) {
-        super();
-        this.data = Object.assign({
-            "name": "group",
-            "label": "Group",
-            "required": false,
-            "locked": false,
-            "children": children,
-            "type": "group",
-            "inline_help_text": "",
-            "help_text": "",
-            "default": {}
-        }, overrides);
-    }
+module.exports = class Group extends _HublField {
 
 
     /**
-     * Return field as JSON
+     * Return group as JSON. Used in Transform process.
+	 * @private
      */
 	toJSON() {
-		this.data.children = transformDataToJson(this.data.children.filter(c => !!c))
+		this.data.children = transformDataToJson(this.data.children)
         return this.data
     }
 
-
 }
-
-module.exports = Group;
