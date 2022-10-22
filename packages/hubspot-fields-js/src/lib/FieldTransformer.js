@@ -1,4 +1,4 @@
-const glob = require('glob');
+const glob = require('glob-all');
 const chalk = require('chalk');
 const path = require('path');
 const fs = require('fs');
@@ -81,7 +81,12 @@ const transformDirectoryWatch = ({ pathToDir, initial = false, extraDirsToWatch 
 }
 
 const getFilesToTransform = ({ pathToDir, ignore = [], absolute = true }) => {
-	return glob.sync(`${pathToDir}/**/*fields.js`, { ignore, absolute })
+	let foldersGlob = (Array.isArray(pathToDir) ? pathToDir : [pathToDir])
+		.map(dir => path.join(dir, `/**/*fields.js`))
+	return glob.sync(foldersGlob, {
+		ignore,
+		absolute
+	})
 }
 
 /* ---- File ---------------------------- */
@@ -98,7 +103,7 @@ const maybeTransformFile = ({ pathToDir, filepath }) => {
 const ignoreFile = (filepath) => {
 	let relative = getAbsPathFromCurrent(filepath);
 	let basename = getBasename(relative);
-	return (basename !== 'fields.js')
+	return (!fs.existsSync(filepath) || basename !== 'fields.js')
 }
 
 const transformFileToJson = (filepath, appendToExsting = false) => {
@@ -136,16 +141,15 @@ const transformDataToJsonFromJsFile = (JsSrcFullPath) => {
 
 const writeJsonToFile = (JsonSrcFullPath, fieldsJson = []) => {
 	try {
-		// Delete existing JSON
 		if (fs.existsSync(JsonSrcFullPath)) {
 			fs.unlinkSync(JsonSrcFullPath);
 		}
 		// Write to file
 		fs.writeFileSync(JsonSrcFullPath, JSON.stringify(fieldsJson, null, 4));
 		//Return
-		return true
+		return JsonSrcFullPath
 	}
-	catch { 
+	catch (e) {
 		throw e
 	}
 	return false;
@@ -186,7 +190,10 @@ const transformDataToJson = (fields) => {
 
 // Validate Field
 const validateField = (field) => {
-	return !!field && typeof field == 'object'
+	return !!field &&
+		!!field.data?.type &&
+		!field.data?.dontTransform &&
+		typeof field == 'object';
 }
 
 // Reduce Nested Arrays of Fields
